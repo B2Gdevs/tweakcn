@@ -1,25 +1,29 @@
-import { authClient } from "@/lib/auth-client";
-import { SubscriptionStatus } from "@/types/subscription";
-import { useQuery } from "@tanstack/react-query";
+"use client";
 
-async function fetchSubscriptionStatus(): Promise<SubscriptionStatus> {
-  const res = await fetch("/api/subscription", { method: "GET" });
-  return res.json();
-}
+import { SubscriptionStatus } from "@/types/subscription";
+
+/**
+ * TweakCN-OpenAI local stub — upstream fetched /api/subscription (which
+ * hit the Polar billing integration via DB). We stripped both. This hook
+ * returns a frozen "unlimited pro" state so every editor gate resolves
+ * to "allowed."
+ */
+
+const LOCAL_UNLIMITED: SubscriptionStatus = {
+  isSubscribed: true,
+  requestsUsed: 0,
+  requestsRemaining: Number.POSITIVE_INFINITY,
+};
 
 export const SUBSCRIPTION_STATUS_QUERY_KEY = "subscriptionStatus";
 
 export function useSubscription() {
-  const { data: session } = authClient.useSession();
-  const isLoggedIn = !!session?.user.id;
-
-  const { data: subscriptionStatus, ...query } = useQuery({
-    queryKey: [SUBSCRIPTION_STATUS_QUERY_KEY],
-    queryFn: fetchSubscriptionStatus,
-    enabled: isLoggedIn,
-    staleTime: 1000 * 60 * 5, // 5 minutes
-    refetchOnWindowFocus: false,
-  });
-
-  return { subscriptionStatus, ...query };
+  return {
+    subscriptionStatus: LOCAL_UNLIMITED,
+    isPending: false as const,
+    isLoading: false as const,
+    isError: false as const,
+    error: null,
+    refetch: async () => LOCAL_UNLIMITED,
+  };
 }

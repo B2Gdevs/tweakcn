@@ -1,217 +1,87 @@
 "use server";
 
-import { z } from "zod";
-import { db } from "@/db";
-import { theme as themeTable, communityTheme } from "@/db/schema";
-import { eq, and, sql } from "drizzle-orm";
-import cuid from "cuid";
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
-import { themeStylesSchema, type ThemeStyles } from "@/types/theme";
+import { Theme, ThemeStyles } from "@/types/theme";
 import { cache } from "react";
-import {
-  UnauthorizedError,
-  ValidationError,
-  ThemeNotFoundError,
-  ErrorCode,
-  actionError,
-  actionSuccess,
-  type ActionResult,
-} from "@/types/errors";
-import { MAX_FREE_THEMES } from "@/lib/constants";
-import { getMyActiveSubscription } from "@/lib/subscription";
+import { actionSuccess, type ActionResult } from "@/types/errors";
 
-// Helper to get user ID with better error handling
-async function getCurrentUserId(): Promise<string> {
-  const session = await auth.api.getSession({
-    headers: await headers(),
-  });
+/**
+ * TweakCN-OpenAI local stub — upstream CRUD hit drizzle + Postgres. We
+ * stripped both. These server actions now return empty reads and
+ * success-looking writes without persisting anything. The editor still
+ * works; theme export (copy the CSS block) is how you save.
+ *
+ * Client-side local persistence (localStorage) lives in the zustand
+ * stores already, so in-progress edits survive refresh. What was
+ * stripped is multi-user cloud save — not needed for local theme work.
+ *
+ * Signature notes:
+ *   - Readers (`getTheme`, `getThemes`) return raw Theme/Theme[] to
+ *     match the call sites in hooks/themes/* and the editor page.
+ *   - Mutators (`createTheme`, `updateTheme`, `deleteTheme`) return
+ *     ActionResult<T> because the mutation hook branches on
+ *     `result.success` / `result.error.code`.
+ */
 
-  if (!session?.user?.id) {
-    throw new UnauthorizedError();
-  }
-
-  return session.user.id;
+export async function getThemes(): Promise<Theme[]> {
+  return [];
 }
 
-// Log errors for observability
-function logError(error: Error, context: Record<string, any>) {
-  console.error("Theme action error:", error, context);
-
-  // TODO: Add server-side error reporting to PostHog or your preferred service
-  // For production, you'd want to send critical errors to an external service
-  if (error.name === "UnauthorizedError" || error.name === "ValidationError") {
-    // These are expected errors, log but don't report
-    console.warn("Expected error:", { error: error.message, context });
-  } else {
-    // Unexpected errors should be reported
-    console.error("Unexpected error:", { error: error.message, stack: error.stack, context });
-  }
-}
-
-const createThemeSchema = z.object({
-  name: z.string().min(1, "Theme name cannot be empty").max(50, "Theme name too long"),
-  styles: themeStylesSchema,
+export const getTheme = cache(async (_themeId: string): Promise<Theme | null> => {
+  return null;
 });
 
-const updateThemeSchema = z.object({
-  id: z.string().min(1, "Theme ID required"),
-  name: z.string().min(1, "Theme name cannot be empty").max(50, "Theme name too long").optional(),
-  styles: themeStylesSchema.optional(),
-});
-
-// Layer 1: Clean server actions with proper error handling
-export async function getThemes() {
-  try {
-    const userId = await getCurrentUserId();
-    const userThemes = await db
-      .select({
-        id: themeTable.id,
-        userId: themeTable.userId,
-        name: themeTable.name,
-        styles: themeTable.styles,
-        createdAt: themeTable.createdAt,
-        updatedAt: themeTable.updatedAt,
-        isPublished: sql<boolean>`${communityTheme.id} is not null`.as(
-          "is_published"
-        ),
-      })
-      .from(themeTable)
-      .leftJoin(communityTheme, eq(themeTable.id, communityTheme.themeId))
-      .where(eq(themeTable.userId, userId));
-    return userThemes;
-  } catch (error) {
-    logError(error as Error, { action: "getThemes" });
-    throw error;
-  }
+export async function createTheme(formData: {
+  name: string;
+  styles: ThemeStyles;
+}): Promise<ActionResult<Theme>> {
+  // Upstream returned the whole Theme row as `data` — match that shape so
+  // `result.data.id`, `result.data.createdAt.toISOString()`, etc. keep working.
+  const now = new Date();
+  const theme: Theme = {
+    id: "local-" + Date.now().toString(36),
+    userId: "local-user",
+    name: formData.name,
+    styles: formData.styles,
+    createdAt: now,
+    updatedAt: now,
+  };
+  return actionSuccess(theme);
 }
 
-export const getTheme = cache(async (themeId: string) => {
-  try {
-    if (!themeId) {
-      throw new ValidationError("Theme ID required");
-    }
-
-    const [theme] = await db.select().from(themeTable).where(eq(themeTable.id, themeId)).limit(1);
-
-    if (!theme) {
-      throw new ThemeNotFoundError();
-    }
-
-    return theme;
-  } catch (error) {
-    logError(error as Error, { action: "getTheme", themeId });
-    throw error;
-  }
-});
-
-export async function createTheme(formData: { name: string; styles: ThemeStyles }) {
-  try {
-    const userId = await getCurrentUserId();
-
-    const validation = createThemeSchema.safeParse(formData);
-    if (!validation.success) {
-      throw new ValidationError("Invalid input", validation.error.format());
-    }
-
-    // Check theme limit
-    const userThemes = await db.select().from(themeTable).where(eq(themeTable.userId, userId));
-
-    if (userThemes.length >= MAX_FREE_THEMES) {
-      const activeSubscription = await getMyActiveSubscription(userId);
-      const isSubscribed =
-        !!activeSubscription &&
-        activeSubscription?.productId === process.env.NEXT_PUBLIC_TWEAKCN_PRO_PRODUCT_ID;
-
-      if (!isSubscribed) {
-        return actionError(
-          ErrorCode.THEME_LIMIT_REACHED,
-          `You have reached the limit of ${MAX_FREE_THEMES} themes.`
-        );
-      }
-    }
-
-    const { name, styles } = validation.data;
-    const newThemeId = cuid();
-    const now = new Date();
-
-    const [insertedTheme] = await db
-      .insert(themeTable)
-      .values({
-        id: newThemeId,
-        userId: userId,
-        name: name,
-        styles: styles,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning();
-
-    return actionSuccess(insertedTheme);
-  } catch (error) {
-    logError(error as Error, { action: "createTheme", formData: { name: formData.name } });
-    throw error;
-  }
+export async function updateTheme(formData: {
+  id: string;
+  name?: string;
+  styles?: ThemeStyles;
+}): Promise<Theme> {
+  // Consumer (`use-theme-mutations.ts useUpdateTheme`) does NOT unwrap an
+  // ActionResult — its onSuccess expects the raw Theme. Match that shape.
+  const now = new Date();
+  const theme: Theme = {
+    id: formData.id,
+    userId: "local-user",
+    name: formData.name ?? "Local theme",
+    styles:
+      formData.styles ??
+      ({ light: {}, dark: {} } as unknown as ThemeStyles),
+    createdAt: now,
+    updatedAt: now,
+  };
+  return theme;
 }
 
-export async function updateTheme(formData: { id: string; name?: string; styles?: ThemeStyles }) {
-  try {
-    const userId = await getCurrentUserId();
-
-    const validation = updateThemeSchema.safeParse(formData);
-    if (!validation.success) {
-      throw new ValidationError("Invalid input", validation.error.format());
-    }
-
-    const { id: themeId, name, styles } = validation.data;
-
-    if (!name && !styles) {
-      throw new ValidationError("No update data provided");
-    }
-
-    const updateData: Partial<typeof themeTable.$inferInsert> = {
-      updatedAt: new Date(),
-    };
-    if (name) updateData.name = name;
-    if (styles) updateData.styles = styles;
-
-    const [updatedTheme] = await db
-      .update(themeTable)
-      .set(updateData)
-      .where(and(eq(themeTable.id, themeId), eq(themeTable.userId, userId)))
-      .returning();
-
-    if (!updatedTheme) {
-      throw new ThemeNotFoundError("Theme not found or not owned by user");
-    }
-
-    return updatedTheme;
-  } catch (error) {
-    logError(error as Error, { action: "updateTheme", themeId: formData.id });
-    throw error;
-  }
+export async function deleteTheme(themeId: string): Promise<Theme> {
+  // Consumer expects the deleted row (uses `data.name` in a toast).
+  const now = new Date();
+  return {
+    id: themeId,
+    userId: "local-user",
+    name: "Deleted theme",
+    styles: { light: {}, dark: {} } as unknown as ThemeStyles,
+    createdAt: now,
+    updatedAt: now,
+  };
 }
 
-export async function deleteTheme(themeId: string) {
-  try {
-    const userId = await getCurrentUserId();
-
-    if (!themeId) {
-      throw new ValidationError("Theme ID required");
-    }
-
-    const [deletedTheme] = await db
-      .delete(themeTable)
-      .where(and(eq(themeTable.id, themeId), eq(themeTable.userId, userId)))
-      .returning({ id: themeTable.id, name: themeTable.name });
-
-    if (!deletedTheme) {
-      throw new ThemeNotFoundError("Theme not found or not owned by user");
-    }
-
-    return deletedTheme;
-  } catch (error) {
-    logError(error as Error, { action: "deleteTheme", themeId });
-    throw error;
-  }
-}
+// (Upstream re-exports of ErrorCode / actionError removed — a "use server"
+// module can only export async functions per Next.js. Callers should
+// import those from `@/types/errors` directly.)

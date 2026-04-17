@@ -1,5 +1,5 @@
-import { theme } from "@/db/schema";
-import { InferSelectModel } from "drizzle-orm";
+// TweakCN-OpenAI: dropped the drizzle import. The original `Theme` type
+// was inferred from the drizzle theme table; we declare it directly now.
 import { z } from "zod";
 
 export const themeStylePropsSchema = z.object({
@@ -107,4 +107,23 @@ export type ThemePreset = {
   };
 };
 
-export type Theme = InferSelectModel<typeof theme>;
+// Was inferred via drizzle InferSelectModel<typeof theme>. Declared
+// directly so we don't need the drizzle/schema layer at all. Keep
+// optional fields from the upstream schema so components that reach
+// for community/published metadata still compile.
+export type Theme = {
+  id: string;
+  userId: string | null;
+  name: string;
+  // Match upstream drizzle shape: full `ThemeStyles`, not partial. Consumers
+  // that read `theme.styles.light.background` typed this as a required value.
+  styles: ThemeStyles;
+  // Upstream drizzle used `timestamp` columns (Date). Kept as Date here
+  // so `.toISOString()` call sites keep working.
+  createdAt: Date;
+  updatedAt: Date;
+  isPublished?: boolean;
+  likeCount?: number;
+  tags?: string[];
+  description?: string | null;
+};
