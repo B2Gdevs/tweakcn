@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
           tools: THEME_GENERATION_TOOLS,
           stopWhen: stepCountIs(5),
           onError: (error) => {
-            if (error instanceof Error) console.error(error);
+            console.error("[generate-theme] streamText error:", error);
           },
           experimental_context: context,
         });

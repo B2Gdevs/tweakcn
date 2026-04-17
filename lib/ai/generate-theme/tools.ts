@@ -18,6 +18,9 @@ export const THEME_GENERATION_TOOLS = {
         providerOptions: baseProviderOptions,
         schema: themeStylesOutputSchema,
         messages,
+        onError: (error) => {
+          console.error("[generateTheme tool] streamObject error:", error);
+        },
       });
 
       for await (const chunk of partialObjectStream) {
