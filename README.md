@@ -1,89 +1,107 @@
-<div align="center">
-  <h1>tweakcn.com</h1>
-</div>
+# TweakCN-OpenAI
 
-<div align="center">
-  <a href="https://vercel.com/oss">
-    <img alt="Vercel OSS Program" src="https://vercel.com/oss/program-badge.svg" />
-  </a>
-  <br />
-  <br />
-  <a href="https://discord.gg/Phs4u2NM3n" target="_blank">
-    <img alt="Discord" src="https://img.shields.io/discord/1353416868769173576?style=for-the-badge&logo=discord&logoColor=%23ffffff">
-  </a>
-  <img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/jnsahaj/tweakcn?style=for-the-badge&logo=github">
-  <a href="https://x.com/iamsahaj_xyz">
-    <img alt="X (formerly Twitter) URL" src="https://img.shields.io/twitter/url?url=https%3A%2F%2Fx.com%2Fiamsahaj_xyz&style=for-the-badge&logo=x&label=%40iamsahaj_xyz&color=%2300000000" />
-  </a>
-</div>
+A lightweight fork of [tweakcn](https://github.com/jnsahaj/tweakcn) — the visual theme editor for Tailwind CSS & shadcn/ui — with the full SaaS stack stripped out and the AI provider swapped from Gemini to OpenAI.
 
-<br />
+**Not a replacement for upstream.** Use [tweakcn.com](https://tweakcn.com) for the hosted product with presets, accounts, and sharing. Use this fork when you want to:
 
-**[tweakcn](https://tweakcn.com)** is a powerful Visual Theme Editor for tailwind CSS & shadcn/ui components. It comes with Beautiful theme presets to get started, while aiming to offer advanced customisation for each aspect of your UI
+- Run the theme editor locally with zero accounts
+- Bring your own OpenAI key (BYOK)
+- Embed the editor surface into another app without inheriting auth/billing/analytics
 
-![tweakcn.com](public/og-image.v050725.png)
+## What was removed vs. upstream
 
-## Motivation
+| Removed | Reason |
+|---|---|
+| Better Auth / session middleware | No accounts in this fork |
+| Database (Postgres / Prisma models, migrations) | No persisted user data |
+| Stripe billing + subscription gating | Not applicable |
+| Upstash rate-limit middleware | No shared backend to protect |
+| PostHog analytics | No telemetry |
+| Share / save / theme-history persistence | No backend to persist to |
+| Gemini provider (Google Generative AI) | Swapped for OpenAI |
 
-Websites made with shadcn/ui famously look the same. tweakcn is a tool that helps you customize shadcn/ui components visually, to make your components stand-out. The goal is to build a platform where a user can discover endless customization options and then have the ability to put their own twist on it.
+## What was added / changed
 
-## Current Features
+| Added | Notes |
+|---|---|
+| OpenAI provider (`@ai-sdk/openai`) | `gpt-4o-mini` default, `gpt-4o` for complex generations |
+| BYOK posture (planned) | Key entered in UI, held only in `sessionStorage`, sent per request, never persisted server-side |
+| Improved error surfacing on `streamText` / `streamObject` | Non-Error provider events now log with source tags |
 
-You can find the full feature list here: https://tweakcn.com/#features
+Everything else — the editor UI, the tweak panels, the CSS export, the preview — is upstream. All the visual and interaction work belongs to the original author.
 
-## Run Locally
-
-**IMPORTANT: For contributions, please see [CONTRIBUTING.md](CONTRIBUTING.md).**
+## Run locally
 
 ### Prerequisites
 
 - Node.js 18+
-- npm / yarn / pnpm
+- pnpm (recommended) or npm
+- An OpenAI API key (only needed for AI generation; the rest of the editor works without one)
 
-### Installation
-
-1. Clone the repository:
+### Install
 
 ```bash
-git clone https://github.com/jnsahaj/tweakcn.git
+git clone https://github.com/B2Gdevs/tweakcn.git
 cd tweakcn
+pnpm install
 ```
 
-2. Install dependencies:
+### Env
+
+Create `.env.local`:
+
+```
+OPENAI_API_KEY=sk-...
+```
+
+For deployment, the BYOK flow (planned) lets end users supply their own key from the UI and avoids baking a key into the deployment.
+
+### Dev
 
 ```bash
-npm install
+pnpm dev              # localhost:3000
+PORT=3010 pnpm dev    # if 3000 is taken
 ```
 
-3. Start the development server:
+Editor lives at `/editor/theme`.
+
+### Build
 
 ```bash
-npm run dev
+pnpm build
+pnpm start
 ```
 
-4. Open [http://localhost:3000](http://localhost:3000) in your browser.
+## BYOK design (planned)
 
-## Contributors
+End users of a deployed instance are expected to supply their own OpenAI key rather than spending the deployer's credits. The design:
 
-<a href="https://github.com/jnsahaj/tweakcn/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=jnsahaj/tweakcn" />
-</a>
+| Layer | Behavior |
+|---|---|
+| Browser | Key entered once per tab. Stored in `sessionStorage` — tab-scoped, dies on tab close. Never `localStorage` unless user opts in. |
+| Network | Sent in request body to `/api/generate-theme` over HTTPS. |
+| Server (Vercel Functions) | Received as a variable, passed directly to the OpenAI client, never written to disk, never logged. |
+| UI | Explicit banner: "Your key lives in this tab only. We never store it on our servers. Clears when you close this tab." |
+| Optional | "Remember for 24h" toggle → encrypt with Web Crypto using a device-bound key → `localStorage`. Default OFF. |
 
-Made with [contrib.rocks](https://contrib.rocks).
+Rationale: Vercel serverless has no reliable cross-instance persistence without KV/Redis. "Encrypted server-side temp, cleared after request" is weaker than never storing at all.
 
-### Interested in Contributing?
+## Consumers
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+This fork exists to be consumed by downstream apps that want the editor surface without the SaaS stack. Current downstream:
 
-# Star History
+- **[get-anything-done](https://github.com/B2Gdevs/get-anything-done)** — mounts the editor as a "Theme" nav item on its landing site. Auth, marketplace, user projects, and persistence live in the parent app; this fork stays minimal.
 
-<p align="center">
-  <a target="_blank" href="https://star-history.com/#jnsahaj/tweakcn&Date">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=jnsahaj/tweakcn&type=Date&theme=dark">
-      <img alt="GitHub Star History for jnsahaj/tweakcn" src="https://api.star-history.com/svg?repos=jnsahaj/tweakcn&type=Date">
-    </picture>
-  </a>
-</p>
+If you want to consume it as a library (rather than git-cloning the whole app), a `packages/tweakcn-openai` extraction is tracked in the parent project's roadmap.
 
-<!-- GitAds-Verify: HX84XPI5OQ816367AROGJ9SROARUHQER -->
+## Credit
+
+All design, UX, and theme-editor architecture belongs to **[Sahaj Jain (@iamsahaj_xyz)](https://github.com/jnsahaj)** and contributors at [jnsahaj/tweakcn](https://github.com/jnsahaj/tweakcn). If you find this useful, support the upstream project:
+
+- ⭐ [Star the original](https://github.com/jnsahaj/tweakcn)
+- Use the hosted version at [tweakcn.com](https://tweakcn.com) when accounts, presets, and sharing matter
+- Follow [@iamsahaj_xyz](https://x.com/iamsahaj_xyz)
+
+## License
+
+Inherits upstream license. See [LICENSE](LICENSE).
